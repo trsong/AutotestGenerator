@@ -1,0 +1,387 @@
+#lang racket
+;;****************************************************************
+;;
+;; CS 135 Test Generator
+;; Sam (Tangrui Song)
+;; Nov 27, 2013
+;;
+;;****************************************************************
+
+(provide (all-defined-out))
+
+;; Main functions provided
+;; init                 --- initialize
+;; lang                 --- check and set language level
+;; testgen              --- Autotest Generator
+;; set-conversion       --- set conversion rule for unbuilt-in data type  (eg convert bt-node to string)
+;; reset-conversion     --- reset conversion rule
+;; set-require          --- set require module(s) (must put module in the same directory of testgen.ss) 
+;; reset-require        --- reset require
+
+;; Useful helper functions provided
+;; create-file          --- create a file
+;; create-directory     --- create a directory
+;; copy                 --- copy a file into destination
+;; l2str                --- convert a (listof Any) to a string using "list" notation eg. '(1 (2) ((3))) -> "(list 1 (list 2) (list (list 3)))"
+;; cons2str             --- convert a (listof Any) to a string using "cons" notation eg. '(1 2) -> "(cons 1 (cons 2 empty))"
+;; v2str                --- convert anything(include list) into string
+;;                          if lang-level = 'B beginning student then convert list using "cons" notation
+;;                          otherwise using "list" notation
+
+
+
+;;----------------------------------------------------------------
+;; Helper func
+(define-struct posn (x y))
+
+;; init-flag
+(define init-flag false)
+
+
+;; create-file: String String -> (void)
+;;             create a file with name and contents 
+(define (create-file name contents)
+  (cond [(file-exists? name)  (define out (open-output-file name #:exists 'replace))
+                              (display contents out)
+                              (close-output-port out)]
+        [else (define out (open-output-file name ))
+                          (display contents out)
+                          (close-output-port out)]))
+;; create-directory: String -> void
+(define (create-directory name)
+ (if (directory-exists? name) (void) (make-directory name)))
+
+;; copy
+(define (copy file dest)
+  (define dest-file (string-append dest file))
+  (if (file-exists? dest-file) (delete-file dest-file) (void))
+  (copy-file file dest-file)
+)
+
+
+
+;;conversion-rule is an AL: (pair (X->Boolean) (X->String))
+;; First field is a predicate. Second converts X to String.
+(define conversion-rule '())
+
+;;set-conversion: (X->Boolean) (X->String) -> (void)
+;; consumes a boolean predicate,and string conversion function. add them to conversion-rule
+(define (set-conversion pair)
+  (set! conversion-rule (append (list pair) conversion-rule)))
+
+;;reset-conversion: (void) -> (void)
+(define (reset-conversion) (set! conversion-rule '()))
+
+
+;;l2str (list to string): (listof Any) -> String
+(define (l2str l)
+  (cond [(empty? l) ""]
+        [(not (list? l)) (v2str l)]
+        [else (format "(list ~a) \n                " (foldr string-append "" (map v2str l)))]))
+
+;;cons2str (cons(list for Beginning Stduent) to string) : (listof Any) -> String
+;; convert list to string ("cons" notation)
+(define (cons2str l)
+  (cond [(empty? l) "empty"]
+        [else (format "(cons ~a ~a)" (v2str (first l)) (v2str (rest l)))]))
+
+;; v2str: Any -> String
+;; consumes a value and produce its interpretation as a string
+(define (v2str v)
+  (cond ;; Check whether is in string-rule.
+        [(ormap (lambda (rule) ((first rule) v)) conversion-rule) ((second (first (filter (lambda (rule) ((first rule) v)) conversion-rule))) v)]
+        [(char? v) (format "#\\~a " v)]
+        [(empty? v) "empty "]
+        [(string? v) (format "\"~a\" " v)]
+        [(posn? v) (format "(make-posn ~a ~a) " (posn-x v) (posn-y v))]
+        [(symbol? v) (format "\'~a " v)]
+        [(number? v) (format "~a " v)]
+        [(boolean? v) (if v "true " "false ")]
+        [(and (list? v) (equal? lang-level 'B)) (cons2str v)]
+        [(list? v) (l2str v)]
+        [(procedure? v)   (define func-str (format "~a" v))
+                          (define func-name (substring func-str 12 (sub1 (string-length func-str))))
+                          (format "~a " func-name)]
+        [else (format "~a" v)]))
+
+
+
+;; banner
+(define banner-str "
+#lang racket
+
+(require racket/set)
+
+(define banned-fcns (make-hash))
+(define error-message \"(~a ...) is not allowed.\")
+
+;; Ban system 
+(define-syntax (ban stx)
+  (syntax-case stx ()
+    [(_) #'(void)]
+    [(_ toban ...)
+     (with-syntax ([(new-names ...) ; construct new names
+                    (map (lambda (syn)
+                           (datum->syntax stx (string->symbol (string-append \"banned-\" (format \"~a\" (syntax->datum syn))))))
+                         (syntax->list #'(toban ...)))])
+       #'(begin (define new-names
+                  (lambda args
+                     (error (format error-message (quote toban)))))                  
+                ...              
+                (provide (rename-out [new-names toban])) ...
+                (hash-set! banned-fcns (quote toban) (quote toban)) ...))]))
+
+")
+
+
+(define computeMarks 
+  (foldr (lambda (x y) (string-append x "\n" y)) "\n"
+  '("#!/bin/bash"
+  ""
+  "term=`/u/isg/bin/termcode`"
+  "a00log=\"/u/cs135/course/publictest/${term}/a00.completedrun.log\""
+  ""
+  "# make sure a00 public test log exists"
+  "if [ ! -r ${a00log} ]; then"
+  "   # log doesn't exist..."
+  "   echo \"Log ${a00log} does not exist\""
+  "   exit 51"
+  "fi"
+  ""
+  "# Check if a00 completed"
+  "grep -q -P \"^\\d+\\s+${student}\\s+.*\\s+4$\" ${a00log}"
+  "if [ 1 -eq $? ]; then"
+  "   # Student has not completed a00"
+  "   echo \"Assignment 0 not completed; it does not have a mark of\" >> $marksheet"
+  "   echo \"4/4 as of `date`.\" >> $marksheet"
+  "   echo >> $marksheet"
+  "   echo \"You will get zero on the automated testing portion for\" >> $marksheet"
+  "   echo \"this assignment, but the grader will still mark\" >> $marksheet"
+  "   echo \"the other criteria.\" >> $marksheet"
+  "   echo >> $marksheet"
+  "   touch ${tmpdir}/a00_not_completed"
+  "fi"
+  ""
+  "# Check for non-plain text files"
+  "for f in $(find ${submitdir} -iname \"*.rkt\" -or -iname \"*.ss\" -or -iname \"*.scm\"); do "
+  "   if [ `racket /u/cs135/bin/iswxme.rkt ${f}` = \"yes\" ]; then"
+  "      echo \"WARNING: File ${f##*/} might be non-plain text.\" >> $marksheet"
+  "   fi"
+  "done"
+  "echo >> $marksheet"
+  ""
+  "# run rst "
+  "exec /u/isg/bittersuite3/computeMarks -q")))
+
+
+
+;;----------------------------------------------------------------
+;; Main Func
+;; language level:
+;;                'B      ----Beginning Student (default setting)
+;;                'BL     ----Beginning Student w/ List Abb.
+;;                'I      ----Intermediate Student
+;;                'IL     ----Intermediate Student w/ Lambda
+;; Usage:
+;;       (lang)
+;;
+
+(define lang-level 'B)
+(define (lang-level-str)
+  (cond [(symbol=? lang-level 'B) "scheme/beginner"]
+        [(symbol=? lang-level 'BL) "scheme/beginner-abbr"]
+        [(symbol=? lang-level 'I) "scheme/intermediate"]
+        [(symbol=? lang-level 'IL) "scheme/intermediate-lambda"]))
+(define (lang)
+  (cond [init-flag (void)]
+        [else (display "Please init first!") (exit)])
+  (printf "Your current lang-level is ~a. Which lang-level would you want to change to (B,BL,I,IL):" (lang-level-str))
+  (define get-lang (format "~a" (read)))
+  (cond [(string=? get-lang "B") (display "Set lang-level to be Beginning Student (default setting).\n")
+                                 (set! lang-level 'B)]
+        [(string=? get-lang "BL") (display "Set lang-level to be Beginning Student w/ List Abb.\n")
+                                 (set! lang-level 'BL)]
+        [(string=? get-lang "I") (display "Set lang-level to be Intermediate Student.\n")
+                                 (set! lang-level 'I)]
+        [(string=? get-lang "IL") (display "Set lang-level to be Intermediate Student w/ Lambda.\n")
+                                 (set! lang-level 'IL)]
+        [else (display "Keep current setting.\n")])
+  (define in_config (format "(language ~a)\n(value 1)\n(timeout 60)\n" (lang-level-str)))
+  (if (empty? ban-list) (void) (set! in_config (string-append in_config "(modules \"banner.ss\")\n")))
+  (create-file "in/options.ss" in_config) 
+)
+
+
+;; init: create tests environment. 
+;;      ie. create the list of files/directories in test.0: 
+;;           answers/
+;;           computeMarks
+;;           config.ss
+;;           in/
+;;           provided/
+;;           runTests
+;; Usage:
+;;      (init)
+;;      (init 'B)
+;;      (init 'BL '(list cond reverse first))
+;;      (init '(list cond reverse first length))
+;;      (init 'IL)
+(define ban-list '())
+(define (init [lang 'B] [ban-func-list '()])
+   ;; (init '(banning-func list second)) 
+   (cond  [(list? lang) (set! ban-func-list lang) (set! lang 'B)]
+          [else (void)])
+  
+   ;;Check Invalid Inputs for lang and ban-func-list
+  (cond [(not (symbol? lang)) (display "First param for init should be one of: 'B 'BL 'I 'IL.\n") (exit)]
+        [(not (list? ban-func-list)) (display "Second param for init should be a list!\n") (exit)]
+        [(not (or (symbol=? lang 'B) (symbol=? lang 'BL) (symbol=? lang 'I) (symbol=? lang 'IL)))
+              (display "First param for init should be one of: 'B 'BL 'I 'IL.\n") (exit)]
+        [else (set! lang-level lang)
+              (set! ban-list ban-func-list)
+              (set! init-flag true)])
+
+  
+
+  
+  ;; create computeMarks
+  (create-file "./computeMarks" computeMarks)
+  
+  ;; create answers/
+  (create-directory "./answers")
+  
+  ;; create config.ss
+  (create-file "./config.ss" "(print-by-question true) \n(nroff-mark-scheme true)")
+
+  ;; create runTests
+  (create-file "./runTests" "#!/bin/bash\n/u/isg/bittersuite3/runTests")
+  
+  ;; create in/
+  (create-directory "./in")
+  
+  ;; create provided/
+  (create-directory "./provided")
+  
+  ;; create provided/banner.ss
+  (cond [(empty? ban-func-list) (if (file-exists? "./provided/banner.ss") (delete-file "./provided/banner.ss") (void))]
+        [else (create-file "./provided/banner.ss" (format "~a\n(ban ~a)"  banner-str (foldr (lambda (x y) (string-append x " " y)) "" (map symbol->string ban-func-list))))])
+
+  ;; create in/options.ss
+  (define in_config (format "(language ~a)\n(value 1)\n(timeout 60)\n" (lang-level-str)))
+  (if (empty? ban-func-list) (void) (set! in_config (string-append in_config "(modules \"banner.ss\")\n")))
+  (create-file "in/options.ss" in_config)
+ 
+)
+
+
+(define module-string "")
+;;set-require: (union String (listof String)) -> void
+  ;; r:
+  ;;        string          ---load a module
+  ;;        (listof string) ---load modules
+  
+(define (set-require r)
+  (cond[(string? r) (set! module-string (format "(modules \"~a\")" r)) (copy r "./provided/")]
+        [(empty? r) (set! module-string "")]
+        [else (set! module-string (format "(modules ~a)" (foldr (lambda (x y) (string-append x " " y)) "" (map v2str r)) ))
+              (for ([f r])
+                (copy f "./provided/"))]))
+(define (reset-require) (set! module-string ""))
+
+
+
+;; testgen:
+;;        question (string)           ---question number  eg. "1a" "6BONUS"
+;;        submit   (string)           ---submit file name eg. "b-tree.rkt"
+;;        func     (function pointer) ---function to test eg. reverse length 
+;;        testcase (list)             ---A list of testcases (inputs)  (check document)
+;;        [option1] (symbol: one of 'list 'non-list 'custom)
+;;        [option2] (0 , non-zero number,or a string(pair with 'custom))
+;; usage:
+;;        ;; (my-list-func '(1 2 3)) ;my-list-func consumes only one param and which is a list, use 'list mode
+;;        (testgen "4b" "a4q4b.rkt" my-list-func test4b 'list)
+;;        
+;;        ;; (my-bonus-func 1 2 3) ; since 'non-list is optional, better remove it
+;;        (testgen "6BONUS" "a5q6.rkt" my-bonus-func test6)
+;;        or try (testgen "6BONUS" "a5q6.rkt" my-bonus-func test6 'non-list)
+;;(more details in document)
+
+  
+  ;; option1:  
+  ;;         'non-list            ---eg (f 1 2 3)
+  ;;         'list                ---eg (f (list 1 2 3))
+  ;;         'custom
+  
+  ;; option2: 
+  ;;         0              ---using check-expect
+  ;;         non-zero-int   ---using check-within
+  ;;         string         ---if option1 == 'custom
+
+
+(define (testgen question submit func testcase [option1 'non-list] [option2 0])
+  ;; get the func name
+  (define func-name (v2str func))
+  
+  ;; create ./in/QUESTOIN_NUM/
+  (define in_question (format "./in/~a" question))
+  (create-directory in_question)
+ 
+
+  ;; create ./in/QUESTION_NUM/options.ss
+  (create-file (format "~a/options.ss" in_question) (format "~a\n(loadcode ~a)" module-string (v2str submit)))
+  
+  
+  (define testStr-template "")
+  
+  ;; Check option2
+  (cond [(equal? option2 0) (set! testStr-template "(result ~a)\n(expected ~a)\n")]
+        [(number? option2) (set! testStr-template (string-append "(result (< (abs (- ~a ~a))" (format "~a" option2) "))\n(expected true)\n") )]
+        [else (void)])
+  
+  (define i 1)
+  (for [(c testcase)]
+     ;; testNumber : 001 002 ....
+    (define testNumber (substring (real->decimal-string (/ i 1000) 3) 2))
+    ;; creat ./in/QUESTION_NUM/TEST_NUM/
+    (create-directory (format "./in/~a/~a" question testNumber))
+    ;; prepare to write testStr to testName
+    (define testName (format "./in/~a/~a/test.ss" question testNumber))
+    
+    ;; get arg-list: eg (list 1 'b (make-posn 1 2)) => "1 'b (make-posn 1 2)" 
+    (define arg-list (if (cons? c) (foldr (lambda (x y) (string-append x " " y)) "" (map v2str c))
+                                   (v2str c)))
+    (define testStr "")
+    
+      ;; Check option1
+    (cond [(symbol=? option1 'custom) (define numofArg (length (filter (lambda (x) (char=? #\~ x)) (string->list option2))))
+                                    (if (= 2 numofArg) 
+                                        ;; (result (f ~a))
+                                        ;; (expected ~a)
+                                        (set! testStr (format option2 (v2str c) (v2str (func c))))
+                                        ;; (result (f ~a ~a ~a))
+                                        ;; (expected ~a)
+                                        (set! testStr (apply format (append (cons option2 (map v2str c)) (list (v2str (apply func c)))))))]
+        ;; (result (f ~a ~a ~a))
+        ;; (expected ~a)
+        [(symbol=? option1 'non-list) (define statement (format "(~a ~a)" func-name arg-list)) 
+                                      (set! testStr (format testStr-template statement (v2str (if (cons? c) (apply func c) (func c)))) )] ;; (list 1 2 3) => (f 1 2 3)
+                                                                                                                                          ;; 1 => (f 1)
+        ;; (result (f (list ~a)))
+        ;; (expected ~a)
+        [else (define statement (format "(~a ~a)" func-name (v2str c)))
+              (set! testStr (format testStr-template statement (v2str (func c))))])
+    
+    (create-file testName testStr)
+    (set! i (add1 i)))
+  (printf "Question ~a. Sumbit File: ~a. Function: ~a. TestGene Mode: ~a. Done!\n" question submit func-name option1))
+
+
+
+
+
+
+
+
+
+
+

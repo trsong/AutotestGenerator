@@ -1,0 +1,5 @@
+1. Copy Assn.rkt my-gcd.rkt testgen.ss to course account (As in Before Generating Tests)
+2. Run "racket Assn.rkt" in terminal
+3. We get all test files (As in After Generating Tests)
+
+

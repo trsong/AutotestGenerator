@@ -1,0 +1,37 @@
+#!/bin/bash
+
+term=`/u/isg/bin/termcode`
+a00log="/u/cs135/course/publictest/${term}/a00.completedrun.log"
+
+# make sure a00 public test log exists
+if [ ! -r ${a00log} ]; then
+   # log doesn't exist...
+   echo "Log ${a00log} does not exist"
+   exit 51
+fi
+
+# Check if a00 completed
+grep -q -P "^\d+\s+${student}\s+.*\s+4$" ${a00log}
+if [ 1 -eq $? ]; then
+   # Student has not completed a00
+   echo "Assignment 0 not completed; it does not have a mark of" >> $marksheet
+   echo "4/4 as of `date`." >> $marksheet
+   echo >> $marksheet
+   echo "You will get zero on the automated testing portion for" >> $marksheet
+   echo "this assignment, but the grader will still mark" >> $marksheet
+   echo "the other criteria." >> $marksheet
+   echo >> $marksheet
+   touch ${tmpdir}/a00_not_completed
+fi
+
+# Check for non-plain text files
+for f in $(find ${submitdir} -iname "*.rkt" -or -iname "*.ss" -or -iname "*.scm"); do 
+   if [ `racket /u/cs135/bin/iswxme.rkt ${f}` = "yes" ]; then
+      echo "WARNING: File ${f##*/} might be non-plain text." >> $marksheet
+   fi
+done
+echo >> $marksheet
+
+# run rst 
+exec /u/isg/bittersuite3/computeMarks -q
+

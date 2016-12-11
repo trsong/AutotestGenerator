@@ -1,0 +1,2 @@
+
+(loadcode "bool-mystery" )

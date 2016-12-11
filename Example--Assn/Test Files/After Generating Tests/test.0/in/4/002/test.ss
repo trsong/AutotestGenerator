@@ -1,0 +1,13 @@
+
+(result (local [(define result-ans (subsets (list 1 ) 
+                ))
+                        (define expect-ans (list empty (list 1 ) 
+                ) 
+                )
+                        (define (lists-equiv? l1 l2)
+                           (and (= (length l1) (length l2))
+                           (andmap (lambda (x1) (ormap (lambda (x2) (equal? x1 x2)) l2)) l1)
+                           (andmap (lambda (x2) (ormap (lambda (x1) (equal? x1 x2)) l1)) l2)))]
+              (lists-equiv? result-ans expect-ans)
+))
+(expected true)
